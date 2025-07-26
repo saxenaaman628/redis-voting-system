@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/saxenaaman628/redis-voting-system/config"
+	"github.com/saxenaaman628/redis-voting-system/internal/api"
 	"github.com/saxenaaman628/redis-voting-system/internal/redis"
 )
 
@@ -11,7 +12,7 @@ func main() {
 	redis.InitRedis()
 
 	r := gin.Default()
-	// api.SetupRoutes(r)
+	api.RegisterRoutes(r)
 
 	port := config.GetEnv("PORT", "8080")
 	r.Run(":" + port)
