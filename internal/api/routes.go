@@ -10,12 +10,15 @@ import (
 func RegisterRoutes(r *gin.Engine) {
 	r.POST("/login", LoginHandler)
 
-	auth := r.Group("/api")
-	auth.Use(middleware.JWTAuthMiddleware())
-	{
-		// Poll and vote routes will be added here
-		auth.GET("/test", func(ctx *gin.Context) {
-			ctx.JSON(http.StatusOK, map[string]string{"data": "working fine"})
-		})
-	}
+	pollGroup := r.Group("/polls").Use(middleware.JWTAuthMiddleware())
+	auth := r.Group("/api").Use(middleware.JWTAuthMiddleware())
+
+	auth.GET("/test", func(ctx *gin.Context) {
+		ctx.JSON(http.StatusOK, map[string]string{"data": "working fine"})
+	})
+
+	pollGroup.POST("/createPoll", CreatePollHandler)
+	pollGroup.GET("/getAllPoll", ListPollsHandler)
+	pollGroup.GET("/getPoll/:id", GetPollByID)
+	pollGroup.GET("close/:id", ClosePoll)
 }
