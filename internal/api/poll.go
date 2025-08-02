@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/mitchellh/mapstructure"
+	"github.com/saxenaaman628/redis-voting-system/internal/controller"
 	"github.com/saxenaaman628/redis-voting-system/internal/models"
 	"github.com/saxenaaman628/redis-voting-system/internal/redis"
 )
@@ -90,15 +90,14 @@ func ListPollsHandler(c *gin.Context) {
 		if err != nil || len(data) == 0 {
 			continue
 		}
-		log.Println("--DATA--", data)
 		createdAt, _ := time.Parse(time.RFC3339, data["created_at"])
 		expiresAt, _ := time.Parse(time.RFC3339, data["expires_at"])
 		isClosed := data["is_closed"] == "true"
 
 		//check timing
-		if isClosed || expiresAt.Before(time.Now()) {
-			continue // skip expired or closed
-		}
+		// if isClosed || expiresAt.Before(time.Now()) {
+		// 	continue // skip expired or closed
+		// }
 
 		optionsMap, _ := redis.Rdb.HGetAll(ctx, key+":options").Result()
 		var options []string
@@ -114,7 +113,7 @@ func ListPollsHandler(c *gin.Context) {
 			UpdatedBy: data["updated_by"],
 			CreatedAt: createdAt,
 			ExpiresAt: expiresAt,
-			IsClosed:  false,
+			IsClosed:  isClosed,
 		}
 
 		polls = append(polls, poll)
@@ -224,4 +223,110 @@ func ClosePoll(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Poll closed successfully"})
+}
+
+func DeletePollHandler(c *gin.Context) {
+	userID, validUser := c.Get("userID")
+	isAdmin, _ := c.Get("role")
+	// log.Println("userID-----", userID, "isAdmin----", isAdmin)
+	if !validUser {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	pollID := c.Param("id")
+
+	key := "poll:" + pollID
+	optionsKey := fmt.Sprintf("%s:options", key)
+
+	// Check if poll exists
+	exists, err := redis.Rdb.Exists(context.Background(), key).Result()
+	if err != nil || exists == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Poll not found"})
+		return
+	}
+
+	// Get poll details to verify creator
+	pollData, err := redis.Rdb.HGetAll(context.Background(), key).Result()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch poll"})
+		return
+	}
+
+	createdBy := pollData["created_by"]
+	if userID != createdBy && isAdmin != "admin" {
+		c.JSON(http.StatusForbidden, gin.H{"error": "You are not allowed to delete this poll"})
+		return
+	}
+
+	// Delete poll
+	_, err = redis.Rdb.Del(context.Background(), key, optionsKey).Result()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete poll"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Poll deleted successfully"})
+}
+
+func SearchPollsHandler(c *gin.Context) {
+	createdBy := c.Query("created_by")
+	fromDateStr := c.Query("from_date")
+	toDateStr := c.Query("to_date")
+	isClosedStr := c.Query("is_closed")
+
+	var fromDate, toDate time.Time
+	var err error
+	if fromDateStr != "" {
+		fromDate, err = time.Parse(time.RFC3339, fromDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid from_date format"})
+			return
+		}
+	}
+	if toDateStr != "" {
+		toDate, err = time.Parse(time.RFC3339, toDateStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid to_date format"})
+			return
+		}
+	}
+
+	var isClosedFilter *bool
+	if isClosedStr != "" {
+		isClosed, err := strconv.ParseBool(isClosedStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid is_closed value"})
+			return
+		}
+		isClosedFilter = &isClosed
+	}
+
+	// Fetch all polls from Redis
+
+	allPolls, err := controller.GetAllPolls(c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch polls"})
+		return
+	}
+
+	// Apply filters
+	filtered := make([]models.Poll, 0)
+	for _, poll := range allPolls {
+		if createdBy != "" && poll.CreatedBy != createdBy {
+			continue
+		}
+		if !fromDate.IsZero() && poll.CreatedAt.Before(fromDate) {
+			continue
+		}
+		if !toDate.IsZero() && poll.CreatedAt.After(toDate) {
+			continue
+		}
+		if isClosedFilter != nil && poll.IsClosed != *isClosedFilter {
+			continue
+		}
+		filtered = append(filtered, poll)
+	}
+
+	c.JSON(http.StatusOK, filtered)
 }

@@ -16,6 +16,7 @@ func InitRedis() {
 	Rdb = redis.NewClient(&redis.Options{
 		Addr:     config.GetEnv("REDIS_URI", "localhost:6379"),
 		Password: config.GetEnv("REDIS_PASSWORD", ""),
+		Username: "default",
 		DB:       0,
 	})
 	pong, err := Rdb.Ping(Ctx).Result()

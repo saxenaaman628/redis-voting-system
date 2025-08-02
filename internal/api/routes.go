@@ -21,4 +21,6 @@ func RegisterRoutes(r *gin.Engine) {
 	pollGroup.GET("/getAllPoll", ListPollsHandler)
 	pollGroup.GET("/getPoll/:id", GetPollByID)
 	pollGroup.GET("close/:id", ClosePoll)
+	pollGroup.GET("delete/:id", DeletePollHandler)
+	pollGroup.GET("/search", SearchPollsHandler)
 }
