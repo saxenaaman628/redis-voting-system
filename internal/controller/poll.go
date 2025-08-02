@@ -1,4 +1,4 @@
-package api
+package controller
 
 import (
 	"context"
@@ -12,9 +12,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/mitchellh/mapstructure"
-	"github.com/saxenaaman628/redis-voting-system/internal/controller"
+
 	"github.com/saxenaaman628/redis-voting-system/internal/models"
 	"github.com/saxenaaman628/redis-voting-system/internal/redis"
+	redishandler "github.com/saxenaaman628/redis-voting-system/internal/redisHandler"
 )
 
 var createPollInput struct {
@@ -304,7 +305,7 @@ func SearchPollsHandler(c *gin.Context) {
 
 	// Fetch all polls from Redis
 
-	allPolls, err := controller.GetAllPolls(c)
+	allPolls, err := redishandler.GetAllPolls(c)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch polls"})
 		return
@@ -329,4 +330,52 @@ func SearchPollsHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, filtered)
+}
+
+func GetPollsWithVotes(c *gin.Context) {
+	pattern := "poll:*"
+	keys, err := redis.Rdb.Keys(c, pattern).Result()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch poll keys"})
+		return
+	}
+	polls := []models.Poll{}
+
+	for _, key := range keys {
+		// Ignore non-poll hashes like "poll:<id>:votes"
+		if strings.Contains(key, ":voters") || strings.Contains(key, ":options") || strings.Contains(key, ":votes") {
+			continue
+		}
+		// Get poll hash
+		pollData, err := redis.Rdb.HGetAll(c, key).Result()
+		if err != nil || len(pollData) == 0 {
+			continue
+		}
+
+		// Convert to struct
+		var poll models.Poll
+		mapstructure.Decode(pollData, &poll)
+
+		// Fetch vote counts
+		voteKey := "poll:" + poll.ID + ":votes"
+		voteData, err := redis.Rdb.HGetAll(c, voteKey).Result()
+		if err != nil {
+			voteData = map[string]string{}
+		}
+
+		votes := make(map[string]int64)
+		for option, count := range voteData {
+			intVal, _ := strconv.ParseInt(count, 10, 64)
+			votes[option] = intVal
+		}
+
+		polls = append(polls, models.Poll{
+			ID:       poll.ID,
+			Question: poll.Question,
+			// Options:   poll.Options,
+			Votes: votes,
+		})
+	}
+
+	c.JSON(http.StatusOK, polls)
 }
